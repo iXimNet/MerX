@@ -20,7 +20,7 @@ MerX is a web-based tool that allows you to render diagrams from Mermaid syntax 
 
 ## How to Use
 
-1.  **Open `default.html` in your web browser.**
+1.  **Open `default.html` in your web browser.**, or try https://ixim.com.cn/merx directly.
 2.  **Enter Mermaid Syntax**: Type or paste your Mermaid diagram code into the input text area on the left.
 3.  **Generate Diagram**: Click the "生成图表" (Generate Diagram) button.
 4.  **View Diagram**: The rendered diagram will appear in the panel on the right.
