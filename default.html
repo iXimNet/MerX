@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>图表在线渲染（Mermaid to PNG & SVG）</title>
+  <script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>
+  <!-- <script src="https://cdn.tailwindcss.com"></script> -->
+  <link href="main.css" rel="stylesheet">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden; /* Prevent body scrollbars */
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+    }
+    .main-container {
+      flex: 1; /* Grow to fill body */
+      display: flex; /* Children will be flex items */
+      overflow: hidden; /* Prevent its own scrollbars, children handle their overflow */
+    }
+    #mermaid-diagram {
+      display: flex; 
+      justify-content: center; 
+      align-items: center; 
+      height: 100%; 
+      width: 100%;  
+      overflow: auto; 
+    }
+    #mermaid-diagram svg {
+        max-width: 100%;
+        max-height: 100%;
+    }
+    #error-message { color: red; }
+    .modal {
+      display: none; 
+      position: fixed;
+      z-index: 1;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      overflow: auto; 
+      background-color: rgba(223,223,223,1.0);
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-content {
+      max-width: 80%;
+      max-height: 80%;
+      object-fit: contain; 
+    }
+    .close {
+      position: absolute;
+      top: 15px;
+      right: 35px;
+      color: #f1f1f1;
+      font-size: 40px;
+      font-weight: bold;
+      transition: 0.3s;
+    }
+    .close:hover,
+    .close:focus {
+      color: #bbb;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .zoom-controls {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: white;
+      font-size: 20px;
+    }
+    .zoom-controls button {
+      background-color: rgba(255,255,255,0.5);
+      color: black;
+      border: none;
+      padding: 5px 10px;
+      margin: 0 5px;
+      cursor: pointer;
+    }
+    .action-button {
+        height: 40px; 
+    }
+    .diagram-section-content {
+        display: flex;
+        flex-direction: column;
+        height: 100%; 
+    }
+    .diagram-container {
+      flex-grow: 1; 
+      overflow: hidden; 
+      display: flex; 
+    }
+  </style>
+</head>
+<body class="bg-gray-100 p-2 h-full">
+  <h1 class="text-2xl font-bold mb-2 text-center flex-shrink-0">在线图表（Mermaid to PNG & SVG）</h1>
+  
+  <div class="main-container flex flex-col md:flex-row w-full mx-auto gap-2">
+    <!-- Input section -->
+    <div class="input-section w-full md:w-2/5 bg-white p-3 rounded shadow flex flex-col flex-1 min-h-0 md:flex-initial">
+      <textarea id="mermaid-input" class="w-full p-2 border rounded mb-2 flex-grow" placeholder="输入 Mermaid 语法，例如：graph TD; A-->B; B-->C;"></textarea>
+      <button id="generate-btn" class="action-button bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">生成图表</button>
+      <div id="error-message" class="mt-2 hidden"></div>
+    </div>
+    
+    <!-- Diagram section -->
+    <div class="diagram-section w-full md:w-3/5 flex flex-col flex-1 min-h-0 md:flex-initial">
+      <div class="diagram-section-content bg-white p-3 rounded shadow flex-grow">
+        <div class="diagram-container flex-grow">
+            <div id="mermaid-diagram" class="w-full"></div>
+        </div>
+        <div id="export-buttons-container" class="mt-2 flex justify-end">
+          <button id="export-png-btn" class="action-button bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:bg-gray-400 mr-2" disabled>导出 PNG</button>
+          <button id="export-svg-btn" class="action-button bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 disabled:bg-gray-400" disabled>导出 SVG</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for image preview -->
+  <div id="image-modal" class="modal"> 
+    <span class="close">&times;</span>
+    <img class="modal-content" id="modal-image">
+    <div class="zoom-controls">
+      <button id="zoom-in">+</button>
+      <button id="zoom-out">-</button>
+    </div>
+  </div>
+
+  <script>
+    mermaid.initialize({ startOnLoad: false, theme: 'default' });
+
+    const generateBtn = document.getElementById('generate-btn');
+    const exportPngBtn = document.getElementById('export-png-btn');
+    const exportSvgBtn = document.getElementById('export-svg-btn');
+    const mermaidInput = document.getElementById('mermaid-input');
+    const diagramDiv = document.getElementById('mermaid-diagram');
+    const errorMessage = document.getElementById('error-message');
+    const imageModal = document.getElementById('image-modal');
+    const modalImage = document.getElementById('modal-image');
+    
+    function setExportButtonsState(enabled) {
+        exportPngBtn.disabled = !enabled;
+        exportSvgBtn.disabled = !enabled;
+    }
+
+    function checkOrientation() {
+      // Relying on Tailwind's responsive classes for layout changes.
+    }
+    
+    window.addEventListener('load', () => {
+      checkOrientation(); 
+      setExportButtonsState(false); 
+    });
+    window.addEventListener('resize', checkOrientation); 
+    window.addEventListener('orientationchange', checkOrientation); 
+
+    function generateDiagram() {
+      const input = mermaidInput.value;
+      errorMessage.classList.add('hidden');
+      diagramDiv.innerHTML = '';
+      setExportButtonsState(false); 
+
+      if (!input.trim()) {
+        errorMessage.textContent = '请输入 Mermaid 语法。';
+        errorMessage.classList.remove('hidden');
+        return;
+      }
+
+      try {
+        mermaid.render('generatedDiagram', input)
+          .then(({ svg, bindFunctions }) => {
+            diagramDiv.innerHTML = svg;
+            if (bindFunctions) {
+              bindFunctions(diagramDiv); 
+            }
+            setExportButtonsState(true); 
+
+            const svgElement = diagramDiv.querySelector('svg');
+            if (svgElement) {
+                svgElement.addEventListener('click', () => {
+                imageModal.style.display = 'flex'; 
+                modalImage.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+
+                let scale = 1;
+                modalImage.style.transform = `scale(${scale})`; 
+                document.getElementById('zoom-in').onclick = () => {
+                  scale += 0.1;
+                  modalImage.style.transform = `scale(${scale})`;
+                };
+                document.getElementById('zoom-out').onclick = () => {
+                  if (scale > 0.2) { 
+                    scale -= 0.1;
+                    modalImage.style.transform = `scale(${scale})`;
+                  }
+                };
+                modalImage.addEventListener('wheel', (event) => {
+                  event.preventDefault();
+                  if (event.deltaY < 0) { scale += 0.1; } 
+                  else { if (scale > 0.2) { scale -= 0.1; } }
+                  modalImage.style.transform = `scale(${scale})`;
+                });
+              });
+            }
+          })
+          .catch(err => {
+            console.error('Mermaid rendering error:', err);
+            errorMessage.textContent = '错误：无效的 Mermaid 语法，请检查输入。 ' + err.message;
+            errorMessage.classList.remove('hidden');
+            setExportButtonsState(false);
+          });
+      } catch (err) {
+        console.error('Synchronous error during Mermaid setup:', err);
+        errorMessage.textContent = '错误：无法生成图表，请检查输入。';
+        errorMessage.classList.remove('hidden');
+        setExportButtonsState(false);
+      }
+    }
+
+    generateBtn.addEventListener('click', generateDiagram);
+
+    exportPngBtn.addEventListener('click', () => {
+      const svgElement = diagramDiv.querySelector('svg');
+      if (svgElement) {
+        const svgString = svgElement.outerHTML;
+        downloadFile(svgString, 'diagram.png', 'png');
+      } else {
+        console.error('No SVG diagram found to export.');
+      }
+    });
+
+    exportSvgBtn.addEventListener('click', () => {
+      const svgElement = diagramDiv.querySelector('svg');
+      if (svgElement) {
+        const svgString = svgElement.outerHTML;
+        downloadFile(svgString, 'diagram.svg', 'svg');
+      } else {
+        console.error('No SVG diagram found to export.');
+      }
+    });
+
+    async function downloadFile(svgString, filename, fileType) {
+      if (!svgString) {
+        console.error('No SVG content to download.');
+        return;
+      }
+      try {
+        if (fileType === 'png') {
+          const img = new Image();
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+
+          // Create a temporary SVG element to get its bounding box
+          const tempSvgContainer = document.createElement('div');
+          tempSvgContainer.style.visibility = 'hidden';
+          tempSvgContainer.style.position = 'absolute';
+          tempSvgContainer.innerHTML = svgString;
+          document.body.appendChild(tempSvgContainer);
+          const svgNode = tempSvgContainer.querySelector('svg');
+          
+          let svgWidth, svgHeight;
+          if (svgNode) {
+            const bbox = svgNode.getBBox();
+            svgWidth = bbox.width;
+            svgHeight = bbox.height;
+          } else { // Fallback if getBBox fails or SVG node not found
+            svgWidth = 600; // Default width
+            svgHeight = 400; // Default height
+          }
+          document.body.removeChild(tempSvgContainer);
+
+          img.onload = async () => {
+            const desiredWidth = 1600; // Or a user-configurable width
+            const aspectRatio = svgWidth / svgHeight;
+            const desiredHeight = desiredWidth / aspectRatio;
+
+            canvas.width = desiredWidth;
+            canvas.height = desiredHeight;
+            
+            // Optional: Fill background for SVGs that might have transparent parts
+            ctx.fillStyle = 'white'; // Set a background color if needed
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.drawImage(img, 0, 0, desiredWidth, desiredHeight); 
+            
+            const pngDataUrl = canvas.toDataURL('image/png');
+            
+            if (window.showSaveFilePicker) {
+              const handle = await window.showSaveFilePicker({ suggestedName: filename });
+              const writable = await handle.createWritable();
+              const blob = await dataURLtoBlob(pngDataUrl);
+              await writable.write(blob);
+              await writable.close();
+            } else { 
+              const link = document.createElement('a');
+              link.href = pngDataUrl;
+              link.download = filename;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            }
+          };
+          img.onerror = (e) => console.error('Error loading SVG into image for PNG conversion:', e);
+          img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString);
+
+        } else if (fileType === 'svg') {
+          const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+          if (window.showSaveFilePicker) {
+            const handle = await window.showSaveFilePicker({ suggestedName: filename });
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+          } else { 
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+          }
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          console.log('File save dialog canceled by user.'); 
+        } else {
+          console.error('Error during file download:', err);
+        }
+      }
+    }
+    
+    function dataURLtoBlob(dataURL) {
+      const parts = dataURL.split(',');
+      const contentType = parts[0].match(/:(.*?);/)[1];
+      const raw = window.atob(parts[1]);
+      const rawLength = raw.length;
+      const uInt8Array = new Uint8Array(rawLength);
+      for (let i = 0; i < rawLength; ++i) {
+        uInt8Array[i] = raw.charCodeAt(i);
+      }
+      return new Blob([uInt8Array], { type: contentType });
+    }
+
+    document.querySelector('.close').addEventListener('click', () => {
+      imageModal.style.display = 'none';
+    });
+
+    window.addEventListener('click', (event) => {
+      if (event.target === imageModal) {
+        imageModal.style.display = 'none';
+      }
+    });
+  </script>
+</body>
+</html>
